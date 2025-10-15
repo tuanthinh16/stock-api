@@ -163,221 +163,49 @@ export function analyzeCandles(candles) {
     };
 }
 
-// ==================== SHORT-TERM MARKET ANALYSIS ====================
-
-function analyzeRecentBars(candles, period = 15) {
-    const recentCandles = candles.slice(-period);
-    const closes = recentCandles.map(c => c.close);
-    
-    let bullishBars = 0;
-    let bearishBars = 0;
-    let totalVolume = 0;
-    let highestHigh = -Infinity;
-    let lowestLow = Infinity;
-    
-    recentCandles.forEach((candle, idx) => {
-        if (candle.close > candle.open) bullishBars++;
-        else if (candle.close < candle.open) bearishBars++;
-        
-        totalVolume += candle.volume;
-        highestHigh = Math.max(highestHigh, candle.high);
-        lowestLow = Math.min(lowestLow, candle.low);
-    });
-    
-    const avgClose = closes.reduce((a, b) => a + b, 0) / closes.length;
-    const currentPrice = closes[closes.length - 1];
-    const pricePosition = ((currentPrice - lowestLow) / (highestHigh - lowestLow)) * 100;
-    
-    let momentum = 'NEUTRAL';
-    const bullishPercent = (bullishBars / period) * 100;
-    
-    if (bullishPercent >= 70) momentum = 'STRONG_BULLISH';
-    else if (bullishPercent >= 60) momentum = 'BULLISH';
-    else if (bullishPercent <= 30) momentum = 'STRONG_BEARISH';
-    else if (bullishPercent <= 40) momentum = 'BEARISH';
-    
-    const volatility = ((highestHigh - lowestLow) / avgClose) * 100;
-    
-    return {
-        bullishBars,
-        bearishBars,
-        bullishPercent: Number(bullishPercent.toFixed(1)),
-        momentum,
-        pricePosition: Number(pricePosition.toFixed(1)),
-        volatility: Number(volatility.toFixed(2)),
-        range: { high: highestHigh, low: lowestLow },
-        avgVolume: totalVolume / period
-    };
-}
-
-// ==================== TRADE ADVICE GENERATOR ====================
-
 export function generateTradeAdvice(candles) {
     const analysis = analyzeCandles(candles);
-    if (!analysis) return { text: '⚠️ Insufficient data (minimum 200 candles required)' };
+    if (!analysis) return { text: 'Không đủ dữ liệu để phân tích.' };
 
-    const { trend, signal, strength, ema, rsi, macd, lastPrice, volumeRatio } = analysis;
+    const { trend, signal, ema, lastPrice } = analysis;
     const lastCandle = candles[candles.length - 1];
-    const recentAnalysis = analyzeRecentBars(candles, 15);
+    const volatility = lastCandle.high - lastCandle.low;
+    const tpMultiplier = 1.5;
+    const slMultiplier = 1.0;
 
-    let atrSum = 0;
-    for (let i = candles.length - 20; i < candles.length; i++) {
-        atrSum += candles[i].high - candles[i].low;
-    }
-    const atr = atrSum / 20;
+    const longEntry = lastPrice;
+    const shortEntry = lastPrice;
 
-    let tpMultiplier = 2.0;
-    let slMultiplier = 1.0;
+    const longTP = longEntry + volatility * tpMultiplier;
+    const longSL = longEntry - volatility * slMultiplier;
+    const shortTP = shortEntry - volatility * tpMultiplier;
+    const shortSL = shortEntry + volatility * slMultiplier;
 
-    if (strength === 'STRONG') {
-        tpMultiplier = 2.5;
-        slMultiplier = 1.0;
-    } else if (strength === 'WEAK') {
-        tpMultiplier = 1.5;
-        slMultiplier = 1.2;
-    }
-
-    const longEntryAggressive = lastPrice;
-    const longEntryConservative = Math.min(ema.e20, lastPrice * 0.995);
-    
-    const longTP1 = longEntryAggressive + (atr * tpMultiplier * 0.6);
-    const longTP2 = longEntryAggressive + (atr * tpMultiplier);
-    const longSL = longEntryAggressive - (atr * slMultiplier);
-    const longRR = Number((tpMultiplier / slMultiplier).toFixed(2));
-
-    const shortEntryAggressive = lastPrice;
-    const shortEntryConservative = Math.max(ema.e20, lastPrice * 1.005);
-    
-    const shortTP1 = shortEntryAggressive - (atr * tpMultiplier * 0.6);
-    const shortTP2 = shortEntryAggressive - (atr * tpMultiplier);
-    const shortSL = shortEntryAggressive + (atr * slMultiplier);
-    const shortRR = Number((tpMultiplier / slMultiplier).toFixed(2));
-
+    const rr = Number((tpMultiplier / slMultiplier).toFixed(2));
     let adviceText = '';
-    let recommendation = '';
-
-    let rsiSignal = '🟡 Neutral';
-    if (rsi > 70) rsiSignal = '🔴 Overbought';
-    else if (rsi < 30) rsiSignal = '🟢 Oversold';
-
-    let macdSignal = '➡️ Neutral';
-    if (macd.histogram > 0 && macd.value > macd.signal) {
-        macdSignal = '🟢 Bullish';
-    } else if (macd.histogram < 0 && macd.value < macd.signal) {
-        macdSignal = '🔴 Bearish';
-    }
-
-    let volumeSignal = volumeRatio > 1.5 ? '📊 High Volume' : volumeRatio < 0.7 ? '📉 Low Volume' : '📊 Normal Volume';
-
     if (trend === 'BULLISH') {
-        const confidence = strength === 'STRONG' ? '85%' : strength === 'MODERATE' ? '70%' : '55%';
-        const emoji = strength === 'STRONG' ? '🚀' : '📈';
-
-        recommendation = rsi < 70 ? '✅ LONG Position Recommended' : '⚠️ Wait for RSI < 70';
-
-        adviceText = `
-## ${emoji} TREND: BULLISH (${strength})
-**Confidence:** ${confidence} | **Volume:** ${volumeSignal}
-
-### 📊 Technical Analysis
-**Price:** $${lastPrice.toFixed(2)}
-**RSI(14):** ${rsi.toFixed(2)} ${rsiSignal}
-**MACD:** ${macdSignal}
-**EMA:** ${ema.e10.toFixed(2)} > ${ema.e20.toFixed(2)} > ${ema.e50.toFixed(2)}
-
-### 📈 Recent 15-Bar Analysis
-**Bullish Bars:** ${recentAnalysis.bullishBars}/15 (${recentAnalysis.bullishPercent}%)
-**Momentum:** ${recentAnalysis.momentum}
-**Price Position:** ${recentAnalysis.pricePosition.toFixed(1)}% of 15-bar range
-**Range:** $${recentAnalysis.range.low.toFixed(2)} - $${recentAnalysis.range.high.toFixed(2)}
-**Volatility:** ${recentAnalysis.volatility.toFixed(2)}%
-
-### 💰 LONG SETUP
-${recommendation}
-
-**🎯 AGGRESSIVE Entry:** $${longEntryAggressive.toFixed(2)}
-  - TP1: $${longTP1.toFixed(2)} (+${((longTP1 - longEntryAggressive) / longEntryAggressive * 100).toFixed(2)}%)
-  - TP2: $${longTP2.toFixed(2)} (+${((longTP2 - longEntryAggressive) / longEntryAggressive * 100).toFixed(2)}%)
-  - SL: $${longSL.toFixed(2)} (-${((longEntryAggressive - longSL) / longEntryAggressive * 100).toFixed(2)}%)
-  - R:R = ${longRR}:1
-
-**🎯 CONSERVATIVE Entry:** $${longEntryConservative.toFixed(2)} (Wait for pullback to EMA20)
-  - TP1: $${(longEntryConservative + (atr * tpMultiplier * 0.6)).toFixed(2)}
-  - TP2: $${(longEntryConservative + (atr * tpMultiplier)).toFixed(2)}
-  - SL: $${(longEntryConservative - (atr * slMultiplier)).toFixed(2)}
-
-### 📍 Key Levels
-Support: EMA20=$${ema.e20.toFixed(2)}, EMA50=$${ema.e50.toFixed(2)}
-Resistance: 15-bar High=$${recentAnalysis.range.high.toFixed(2)}
-`;
+        adviceText =
+            `Xu hướng hiện tại: TĂNG (Bullish)\n` +
+            `Có thể cân nhắc **LONG** quanh vùng ${longEntry.toFixed(2)}.\n` +
+            `Take Profit (TP): ${longTP.toFixed(2)}\n` +
+            `Stop Loss (SL): ${longSL.toFixed(2)}\n` +
+            `Tỷ lệ R:R ~ ${rr}:1.\n` +
+            `EMA hiện tại: 10=${ema.e10.toFixed(2)}, 20=${ema.e20.toFixed(2)}, 50=${ema.e50.toFixed(2)}.\n` +
+            `→ Ưu tiên MUA khi giá hồi về gần EMA20/EMA50.`;
     } else if (trend === 'BEARISH') {
-        const confidence = strength === 'STRONG' ? '85%' : strength === 'MODERATE' ? '70%' : '55%';
-        const emoji = strength === 'STRONG' ? '📉' : '🔻';
-
-        recommendation = rsi > 30 ? '✅ SHORT Position Recommended' : '⚠️ Wait for RSI > 30';
-
-        adviceText = `
-## ${emoji} TREND: BEARISH (${strength})
-**Confidence:** ${confidence} | **Volume:** ${volumeSignal}
-
-### 📊 Technical Analysis
-**Price:** $${lastPrice.toFixed(2)}
-**RSI(14):** ${rsi.toFixed(2)} ${rsiSignal}
-**MACD:** ${macdSignal}
-**EMA:** ${ema.e10.toFixed(2)} < ${ema.e20.toFixed(2)} < ${ema.e50.toFixed(2)}
-
-### 📉 Recent 15-Bar Analysis
-**Bearish Bars:** ${recentAnalysis.bearishBars}/15 (${(100 - recentAnalysis.bullishPercent).toFixed(1)}%)
-**Momentum:** ${recentAnalysis.momentum}
-**Price Position:** ${recentAnalysis.pricePosition.toFixed(1)}% of 15-bar range
-**Range:** $${recentAnalysis.range.low.toFixed(2)} - $${recentAnalysis.range.high.toFixed(2)}
-**Volatility:** ${recentAnalysis.volatility.toFixed(2)}%
-
-### 💰 SHORT SETUP
-${recommendation}
-
-**🎯 AGGRESSIVE Entry:** $${shortEntryAggressive.toFixed(2)}
-  - TP1: $${shortTP1.toFixed(2)} (+${((shortEntryAggressive - shortTP1) / shortEntryAggressive * 100).toFixed(2)}%)
-  - TP2: $${shortTP2.toFixed(2)} (+${((shortEntryAggressive - shortTP2) / shortEntryAggressive * 100).toFixed(2)}%)
-  - SL: $${shortSL.toFixed(2)} (-${((shortSL - shortEntryAggressive) / shortEntryAggressive * 100).toFixed(2)}%)
-  - R:R = ${shortRR}:1
-
-**🎯 CONSERVATIVE Entry:** $${shortEntryConservative.toFixed(2)} (Wait for pullback to EMA20)
-  - TP1: $${(shortEntryConservative - (atr * tpMultiplier * 0.6)).toFixed(2)}
-  - TP2: $${(shortEntryConservative - (atr * tpMultiplier)).toFixed(2)}
-  - SL: $${(shortEntryConservative + (atr * slMultiplier)).toFixed(2)}
-
-### 📍 Key Levels
-Resistance: EMA20=$${ema.e20.toFixed(2)}, EMA50=$${ema.e50.toFixed(2)}
-Support: 15-bar Low=$${recentAnalysis.range.low.toFixed(2)}
-`;
+        adviceText =
+            `Xu hướng hiện tại: GIẢM (Bearish)\n` +
+            `Có thể cân nhắc **SHORT** quanh vùng ${shortEntry.toFixed(2)}.\n` +
+            `Take Profit (TP): ${shortTP.toFixed(2)}\n` +
+            `Stop Loss (SL): ${shortSL.toFixed(2)}\n` +
+            `Tỷ lệ R:R ~ ${rr}:1.\n` +
+            `EMA hiện tại: 10=${ema.e10.toFixed(2)}, 20=${ema.e20.toFixed(2)}, 50=${ema.e50.toFixed(2)}.\n` +
+            `→ Ưu tiên BÁN khi giá hồi lên vùng EMA20/EMA50.`;
     } else {
-        adviceText = `
-## ↔️ TREND: SIDEWAYS (NEUTRAL)
-**Price:** $${lastPrice.toFixed(2)}
-
-### 📊 Technical Analysis
-**RSI(14):** ${rsi.toFixed(2)} ${rsiSignal}
-**MACD:** ${macdSignal}
-**Volume:** ${volumeSignal}
-
-### 📊 Recent 15-Bar Analysis
-**Bullish/Bearish:** ${recentAnalysis.bullishBars}/${recentAnalysis.bearishBars}
-**Momentum:** ${recentAnalysis.momentum}
-**Price Position:** ${recentAnalysis.pricePosition.toFixed(1)}% of range
-**Range:** $${recentAnalysis.range.low.toFixed(2)} - $${recentAnalysis.range.high.toFixed(2)}
-**Volatility:** ${recentAnalysis.volatility.toFixed(2)}%
-
-### ⚠️ NO CLEAR DIRECTION - WAIT FOR BREAKOUT
-
-**📈 LONG Signal:** Price breaks above EMA50 ($${ema.e50.toFixed(2)}) + Volume > 1.5x
-**📉 SHORT Signal:** Price breaks below EMA50 ($${ema.e50.toFixed(2)}) + Volume > 1.5x
-
-### � Key Levels
-EMA50: $${ema.e50.toFixed(2)}
-EMA100: $${ema.e100.toFixed(2)}
-EMA200: $${ema.e200.toFixed(2)}
-`;
+        adviceText =
+            `Xu hướng hiện tại: SIDEWAY (đi ngang)\n` +
+            `Không khuyến nghị mở vị thế mới, nên chờ phá vỡ EMA50 hoặc EMA100 để xác định hướng rõ ràng hơn.\n` +
+            `Giá hiện tại: ${lastPrice.toFixed(2)}.`;
     }
 
     return {
@@ -385,55 +213,11 @@ EMA200: $${ema.e200.toFixed(2)}
         interval: lastCandle.interval || 'UNKNOWN',
         trend,
         signal,
-        strength,
-        confidence: strength === 'STRONG' ? 85 : strength === 'MODERATE' ? 70 : 55,
         price: lastPrice,
-        indicators: {
-            ema,
-            rsi,
-            macd,
-            volumeRatio
-        },
-        recentBars: recentAnalysis,
-        long: {
-            aggressive: {
-                entry: Number(longEntryAggressive.toFixed(2)),
-                tp1: Number(longTP1.toFixed(2)),
-                tp2: Number(longTP2.toFixed(2)),
-                sl: Number(longSL.toFixed(2)),
-                rr: longRR,
-                profitPercent1: Number(((longTP1 - longEntryAggressive) / longEntryAggressive * 100).toFixed(2)),
-                profitPercent2: Number(((longTP2 - longEntryAggressive) / longEntryAggressive * 100).toFixed(2)),
-                lossPercent: Number(((longEntryAggressive - longSL) / longEntryAggressive * 100).toFixed(2))
-            },
-            conservative: {
-                entry: Number(longEntryConservative.toFixed(2)),
-                tp1: Number((longEntryConservative + (atr * tpMultiplier * 0.6)).toFixed(2)),
-                tp2: Number((longEntryConservative + (atr * tpMultiplier)).toFixed(2)),
-                sl: Number((longEntryConservative - (atr * slMultiplier)).toFixed(2)),
-                rr: longRR
-            }
-        },
-        short: {
-            aggressive: {
-                entry: Number(shortEntryAggressive.toFixed(2)),
-                tp1: Number(shortTP1.toFixed(2)),
-                tp2: Number(shortTP2.toFixed(2)),
-                sl: Number(shortSL.toFixed(2)),
-                rr: shortRR,
-                profitPercent1: Number(((shortEntryAggressive - shortTP1) / shortEntryAggressive * 100).toFixed(2)),
-                profitPercent2: Number(((shortEntryAggressive - shortTP2) / shortEntryAggressive * 100).toFixed(2)),
-                lossPercent: Number(((shortSL - shortEntryAggressive) / shortEntryAggressive * 100).toFixed(2))
-            },
-            conservative: {
-                entry: Number(shortEntryConservative.toFixed(2)),
-                tp1: Number((shortEntryConservative - (atr * tpMultiplier * 0.6)).toFixed(2)),
-                tp2: Number((shortEntryConservative - (atr * tpMultiplier)).toFixed(2)),
-                sl: Number((shortEntryConservative + (atr * slMultiplier)).toFixed(2)),
-                rr: shortRR
-            }
-        },
-        text: adviceText.trim(),
+        ema,
+        long: { entry: longEntry, tp: longTP, sl: longSL },
+        short: { entry: shortEntry, tp: shortTP, sl: shortSL },
+        text: adviceText,
         timestamp: Date.now()
     };
 }
